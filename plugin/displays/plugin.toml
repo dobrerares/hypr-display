@@ -1,0 +1,21 @@
+id = "rdobre/displays"
+name = "Displays & Presenting"
+version = "2.1.0"
+plugin_api = 21
+author = "rdobre"
+license = "MIT"
+icon = "device-desktop"
+description = "Drag-and-drop display layouts with a live schematic, timed rollback, one-switch presenting and remembered rooms."
+dependencies = ["hypr-display"]
+
+[[widget]]
+id = "bar"
+entry = "bar.luau"
+
+[[panel]]
+id = "panel"
+entry = "panel.luau"
+width = 620
+height = 620
+placement = "floating"
+position = "center"
