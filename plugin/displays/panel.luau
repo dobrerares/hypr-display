@@ -590,7 +590,8 @@ render = function()
     ui.toggle({ checked = remembered, enabled = not busy and (remembered or kept), onChange = "onRemember" }),
   }))
 
-  panel.render(ui.column({ gap = 8 }, rows))
+  -- flexGrow: fill the host's fixed-height surface so the schematic card can grow.
+  panel.render(ui.column({ gap = 8, flexGrow = 1 }, rows))
 end
 
 -- --- lifecycle + callbacks --------------------------------------------------
