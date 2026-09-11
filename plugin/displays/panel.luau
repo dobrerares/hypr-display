@@ -12,7 +12,6 @@ local render
 
 local SCALES = { 1, 1.25, 1.333333, 1.5, 2 }
 local LAYOUTS = {
-  { id = "auto", text = "Auto", glyph = "sparkles", tip = "Dock profile from Nix, or the remembered layout for these displays" },
   { id = "internal", text = "Laptop", glyph = "device-laptop", tip = "Laptop screen only" },
   { id = "extend", text = "Extend", glyph = "arrows-horizontal", tip = "Separate desktops on both screens" },
   { id = "mirror", text = "Mirror", glyph = "copy", tip = "Same picture on both screens" },
@@ -118,6 +117,32 @@ local function liveArrangement(internal, target)
   if ty + th <= iy + 1 then return { kind = "stack", first = target, second = internal, off = off } end
   if ty >= iy + ih - 1 then return { kind = "stack", first = internal, second = target, off = off } end
   return { kind = "side", first = internal, second = target, off = off }
+end
+
+-- The shape of what is on screen, independent of how it got there (automatic
+-- profile, chip, drag). Chips and options follow this, not the controller mode.
+-- { id = "internal"|"extend"|"mirror"|"external"|"custom", place, source }
+local function liveShape(internal, target, externals)
+  local on = 0
+  for _, m in ipairs(snap.monitors or {}) do if not m.disabled then on += 1 end end
+  if not internal or #externals == 0 then return { id = on <= 1 and "internal" or "custom" } end
+  for _, m in ipairs(externals) do
+    if m ~= target and not m.disabled then return { id = "custom" } end
+  end
+  if internal.disabled and target.disabled then return { id = "custom" } end
+  if internal.disabled then return { id = "external" } end
+  if target.disabled then return { id = "internal" } end
+  local arr = liveArrangement(internal, target)
+  if arr.kind == "mirror" then return { id = "mirror", source = isInternal(arr.first) and "internal" or "external" } end
+  local place = "right"
+  if arr.kind == "stack" then place = isInternal(arr.first) and "below" or "above"
+  elseif isInternal(arr.second) then place = "left" end
+  return { id = "extend", place = place }
+end
+
+local function shapeLabel(shape)
+  for _, l in ipairs(LAYOUTS) do if l.id == shape.id then return l.text end end
+  return "Custom"
 end
 
 -- --- layout map: what the schematic draws -----------------------------------
@@ -252,7 +277,7 @@ end
 local function tray(map, k, drag, accepts)
   local kids = {
     ui.glyph({ name = "power", size = 14, color = "on_surface_variant" }),
-    ui.label({ text = #map.off > 0 and "Off" or "Drop a display here to turn it off", fontSize = 11, color = "on_surface_variant" }),
+    ui.label({ text = #map.off > 0 and "Off" or (drag and "Drag tiles to rearrange · drop one here to turn it off" or "Off"), fontSize = 11, color = "on_surface_variant" }),
   }
   for _, m in ipairs(map.off) do table.insert(kids, draggable(m, (tileBody(m, k, "off")), drag)) end
   return ui.dropZone({
@@ -293,7 +318,7 @@ local function schematic(map, caption, predicted, drag)
   if #all > 1 then
     table.insert(kids, tray(map, 0.02, drag, #on > 1 and on or {}))
   end
-  table.insert(kids, ui.label({ text = caption, fontSize = 11, color = predicted and "primary" or "on_surface_variant", maxLines = 1, maxWidth = 560 }))
+  table.insert(kids, ui.label({ text = caption, fontSize = 11, color = predicted and "primary" or "on_surface_variant", maxLines = 2, maxWidth = 540, textAlign = "center" }))
   -- The panel surface has a fixed height (no auto-size in the host), so this
   -- card grows to take whatever the rows below do not need.
   return ui.column({
@@ -302,29 +327,28 @@ local function schematic(map, caption, predicted, drag)
   }, kids)
 end
 
-local function summary(arr, internal, target)
-  local mode = snap.mode or "automatic"
+local function summary(shape, internal, target)
   local text
   if not target then
-    text = "No external display connected"
-  elseif mode == "custom" then
+    text = internal and "Laptop only · no external display" or "No displays reported"
+  elseif shape.id == "mirror" then
+    text = shape.source == "internal" and ("Laptop mirrored on " .. short(target)) or (short(target) .. " mirrored on the laptop")
+  elseif shape.id == "external" then
+    text = short(target) .. " only · laptop off"
+  elseif shape.id == "internal" then
+    text = "Laptop only · " .. short(target) .. " off"
+  elseif shape.id == "extend" then
+    local words = { right = " to the right of the laptop", left = " to the left of the laptop", above = " above the laptop", below = " below the laptop" }
+    text = short(target) .. (words[shape.place] or words.right)
+  else
     local on = 0
     for _, m in ipairs(snap.monitors or {}) do if not m.disabled then on += 1 end end
     text = "Custom arrangement · " .. on .. " displays on"
-  elseif mode == "automatic" then
+  end
+  if (snap.mode or "automatic") == "automatic" then
     local profile = snap.profile or ""
     local remembered = profile:match("^remembered:(.*)$")
-    text = remembered and ("Remembered layout: " .. remembered) or ("Automatic · " .. (profile ~= "" and profile or "dock profile"))
-  elseif arr.kind == "mirror" then
-    text = (isInternal(arr.first) and "Laptop" or short(arr.first)) .. " mirrored on " .. (isInternal(arr.second) and "the laptop" or short(arr.second))
-  elseif mode == "external" then
-    text = short(target) .. " only · laptop off"
-  elseif mode == "internal" then
-    text = "Laptop only · " .. short(target) .. " off"
-  elseif arr.kind == "stack" then
-    text = short(target) .. (isInternal(arr.first) and " below" or " above") .. " the laptop"
-  else
-    text = short(target) .. (isInternal(arr.first) and " to the right of" or " to the left of") .. " the laptop"
+    text = (remembered and ("Remembered · " .. remembered) or ("Auto · " .. (profile ~= "" and profile or "profile"))) .. " · " .. text
   end
   if type(snap.present) == "table" then text ..= " · presenting" end
   return text
@@ -375,15 +399,33 @@ end
 -- Options for a layout come from the live state so a change re-applies exactly
 -- what is on screen plus the one thing the user touched.
 local function layoutCommand(layout, overrides)
-  local _, target = outputs()
+  local internal, target, externals = outputs()
   if not target then return nil end
+  local shape = liveShape(internal, target, externals)
   local o = overrides or {}
   local mode = o.mode or modeLabel(target) or "preferred"
   local scale = o.scale or scaleLabel(target.scale or 1)
   local cmd = "hypr-display " .. layout .. " --target " .. quote(target.name) .. " --mode " .. quote(mode) .. " --scale " .. quote(scale)
-  if layout == "extend" then cmd ..= " --place " .. quote(o.place or snap.place or "right") end
-  if layout == "mirror" then cmd ..= " --source " .. quote(o.source or snap.source or "internal") end
+  if layout == "extend" then cmd ..= " --place " .. quote(o.place or shape.place or "right") end
+  if layout == "mirror" then cmd ..= " --source " .. quote(o.source or shape.source or "internal") end
   return cmd
+end
+
+-- Resolution/scale of the target: re-apply the shape with the new value, or,
+-- in a custom arrangement, change just that display in place.
+local function tweak(overrides)
+  local internal, target, externals = outputs()
+  if not target then return end
+  local shape = liveShape(internal, target, externals)
+  if shape.id == "extend" or shape.id == "mirror" or shape.id == "external" then
+    local cmd = layoutCommand(shape.id, overrides)
+    if cmd then run(cmd, "Display change failed") end
+  else
+    local cmd = "hypr-display set " .. quote(target.name)
+    if overrides.mode then cmd ..= " --mode " .. quote(overrides.mode) end
+    if overrides.scale then cmd ..= " --scale " .. quote(overrides.scale) end
+    run(cmd, "Could not change the display")
+  end
 end
 
 local function applyLayout(layout, overrides)
@@ -409,16 +451,15 @@ render = function()
   local kept = mode ~= "automatic" and remaining == 0
   local idle = watcher and not busy
   local hasExternal = target ~= nil
-  local live = liveArrangement(internal, target)
+  local shape = liveShape(internal, target, externals)
   local drag = idle and #(snap.monitors or {}) > 1
 
   -- Hovering a chip previews what it would do; the live layout returns on leave.
-  local map, caption, predicted = liveMap(), summary(live, internal, target), false
-  if drag and not hover and remaining == 0 then caption ..= " · drag a tile to rearrange" end
+  local map, caption, predicted = liveMap(), summary(shape, internal, target), false
   if hover and hasExternal then
     local kind, value = hover:match("^(%w+):(.+)$")
-    local layoutId = mode
-    local place, source = snap.place or "right", snap.source or "internal"
+    local layoutId = shape.id
+    local place, source = shape.place or "right", shape.source or "internal"
     if kind == "layout" then layoutId = value elseif kind == "place" then layoutId, place = "extend", value elseif kind == "source" then layoutId, source = "mirror", value end
     local blocked = lidClosed and (layoutId == "mirror" or layoutId == "internal")
     if blocked then
@@ -443,6 +484,13 @@ render = function()
       ui.label({ text = "Displays", fontSize = 20, fontWeight = "bold", color = "primary" }),
       ui.spacer({ flexGrow = 1 }),
       ui.label({ text = busy and "Applying…" or (not loaded and "Loading…" or (watcher and "" or "Controller offline")), fontSize = 12, color = (busy or not loaded) and "primary" or "error" }),
+      -- Auto is an origin, not a shape: back to the Nix profile or remembered layout.
+      ui.button({
+        key = "layout:auto", text = mode == "automatic" and "Automatic" or "Auto", glyph = "sparkles", glyphSize = 14,
+        selected = mode == "automatic", variant = mode == "automatic" and "primary" or "outline", controlSize = "sm", enabled = not busy,
+        tooltip = mode == "automatic" and "The automatic profile for these displays is active (Nix profile or remembered layout)" or "Back to the automatic profile for these displays",
+        onClick = function() applyLayout("auto") end, onHover = "onChipHover",
+      }),
     }),
     schematic(map, caption, predicted, drag and not predicted),
   }
@@ -456,15 +504,14 @@ render = function()
     table.insert(rows, ui.select({ options = labels, selectedIndex = index, onChange = "onTarget", controlSize = "sm" }))
   end
 
-  -- Layout chips: the selected one mirrors the live mode.
+  -- Layout chips: the selected one is the live shape, however it came about.
   local chips = {}
   for _, l in ipairs(LAYOUTS) do
     local enabled = idle
     local tip = l.tip
     if (l.id == "extend" or l.id == "mirror" or l.id == "external") and not hasExternal then enabled, tip = false, "Connect an external display" end
     if (l.id == "mirror" or l.id == "internal") and lidClosed then enabled, tip = false, "Open the lid first" end
-    if l.id == "auto" then enabled = not busy end
-    local selected = mode == l.id
+    local selected = shape.id == l.id
     table.insert(chips, ui.button({
       key = "layout:" .. l.id, text = l.text, glyph = l.glyph, glyphSize = 14, selected = selected,
       variant = selected and "primary" or "outline", controlSize = "sm", flexGrow = 1, enabled = enabled, tooltip = tip,
@@ -473,21 +520,21 @@ render = function()
   end
   table.insert(rows, ui.row({ gap = 6 }, chips))
 
-  -- Contextual options for the live layout only.
-  if mode == "extend" and hasExternal then
+  -- Contextual options for the live shape only.
+  if shape.id == "extend" and hasExternal then
     local placeChips = { ui.label({ text = "Placement", color = "on_surface_variant", fontSize = 12, width = 84 }) }
     for _, p in ipairs(PLACES) do
-      local selected = (snap.place or "right") == p.id
+      local selected = (shape.place or "right") == p.id
       table.insert(placeChips, ui.button({
         key = "place:" .. p.id, glyph = p.glyph, glyphSize = 14, selected = selected, variant = selected and "primary" or "outline",
         controlSize = "sm", width = 44, enabled = idle, tooltip = p.tip, onClick = function() applyLayout("extend", { place = p.id }) end, onHover = "onChipHover",
       }))
     end
     table.insert(rows, ui.row({ gap = 6, align = "center" }, placeChips))
-  elseif mode == "mirror" and hasExternal then
+  elseif shape.id == "mirror" and hasExternal then
     local sourceChips = { ui.label({ text = "Direction", color = "on_surface_variant", fontSize = 12, width = 84 }) }
     for _, s in ipairs(SOURCES) do
-      local selected = (snap.source or "internal") == s.id
+      local selected = (shape.source or "internal") == s.id
       table.insert(sourceChips, ui.button({
         key = "source:" .. s.id, text = s.text, selected = selected, variant = selected and "primary" or "outline",
         controlSize = "sm", flexGrow = 1, enabled = idle, tooltip = s.tip, onClick = function() applyLayout("mirror", { source = s.id }) end, onHover = "onChipHover",
@@ -496,7 +543,8 @@ render = function()
     table.insert(rows, ui.row({ gap = 6, align = "center" }, sourceChips))
   end
 
-  if (mode == "extend" or mode == "mirror" or mode == "external") and hasExternal then
+  -- Resolution and scale whenever the target shows something, whatever the origin.
+  if hasExternal and not target.disabled then
     local modes, modeIndex = {}, -1
     local current = modeLabel(target)
     for i, m in ipairs(target.availableModes or {}) do
@@ -625,7 +673,7 @@ end
 function onMode(index)
   local _, target = outputs()
   local m = target and target.availableModes and target.availableModes[tonumber(index) + 1]
-  if m then applyLayout(snap.mode, { mode = (m:gsub("Hz$", "")) }) end
+  if m then tweak({ mode = (m:gsub("Hz$", "")) }) end
 end
 function onScale(index)
   local _, target = outputs()
@@ -636,7 +684,7 @@ function onScale(index)
   for _, s in ipairs(SCALES) do if math.abs(s - liveScale) < 0.01 then known = true end end
   if not known then table.insert(scales, 1, liveScale) end
   local s = scales[tonumber(index) + 1]
-  if s then applyLayout(snap.mode, { scale = scaleLabel(s) }) end
+  if s then tweak({ scale = scaleLabel(s) }) end
 end
 function onConfirm() run("hypr-display confirm", "Could not keep the layout", function() noticeText = "Layout kept" end) end
 function onRevert() run("hypr-display revert", "Could not undo the layout") end
@@ -650,7 +698,9 @@ function onPresent(value)
 end
 function onRemember(value)
   if value == "true" then
-    run("hypr-display remember", "Could not remember the layout", function() noticeText = "Remembered for this display setup" end)
+    local internal, target, externals = outputs()
+    local name = shapeLabel(liveShape(internal, target, externals))
+    run("hypr-display remember --name " .. quote(name), "Could not remember the layout", function() noticeText = "Remembered for this display setup" end)
   else
     run("hypr-display forget", "Could not forget the layout", function() noticeText = "Forgotten · automatic profile applied" end)
   end

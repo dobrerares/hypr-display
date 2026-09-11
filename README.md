@@ -153,25 +153,28 @@ The top card draws the live layout from `hyprctl monitors`: each display that sh
 
 Hovering a layout chip redraws the schematic as a prediction of what that click would do; leaving restores the live view. When a layout is blocked (Mirror or Laptop with the lid closed) the caption says why instead.
 
-### Layout chips
+### Shape chips and the Auto button
+
+The chips describe the **shape** of what is on screen, whatever produced it. When your Nix dock profile extends the laptop to the right, the Extend chip is selected, the right arrow is selected and the resolution and scale of the external are editable, even though the origin is "automatic". The same is true after a drag: turning the laptop off by dropping it in the tray leaves you on External, with its options. The summary line names the origin ("Auto · docked · Dell to the right of the laptop", "Remembered · Room 4 · …").
 
 | Chip | Effect |
 |---|---|
-| **Auto** | Apply the automatic profile (Nix profile or remembered layout). If you are already on it with no preview pending, it simply re-applies. If you are on a temporary layout it previews the automatic profile with the same countdown, so Auto is undoable too. |
 | **Laptop** | Laptop panel only, every external off. |
 | **Extend** | Both on with separate desktops. The external goes to the placement chosen below (right by default). |
 | **Mirror** | Both show the same picture; direction chosen below. |
 | **External** | External only, laptop panel off. |
 
+**Auto** sits in the header. It is the origin, not a shape: highlighted while the automatic profile (Nix or remembered) is what is on screen, and otherwise a button that goes back to it. From a temporary layout it previews the automatic profile with the same countdown, so Auto is undoable too. From the automatic layout it simply re-applies the profile.
+
 With one external display it is the implicit target. With several, a select appears above the chips; the chips act on the selected display and leave the others to Hyprland's automatic placement (appended to the right). Use dragging to arrange all of them.
 
 ### Options
 
-Options appear only for the live layout:
+Options appear for the live shape:
 
-- **Placement** (Extend): left, right, above, below. Positions use Hyprland's `auto-*` placements relative to the laptop.
+- **Placement** (Extend): left, right, above, below, with the current side derived from the geometry. Positions use Hyprland's `auto-*` placements relative to the laptop.
 - **Direction** (Mirror): *Laptop → External* copies the laptop panel onto the external at the external's mode; *External → Laptop* makes the external the source at its own mode and copies it onto the laptop. The second is what you want when the external is the bigger screen.
-- **Resolution** and **Scale** (any layout that uses the external): only modes the display advertises are offered; scale from a short list plus the live value.
+- **Resolution** and **Scale** (whenever the external is on): only modes the display advertises are offered; scale from a short list plus the live value. In Extend, Mirror and External the shape is re-applied with the new value; in a custom arrangement (`hypr-display set`) only that display changes and its neighbours move by the size difference.
 
 Changing an option re-applies the layout and restarts the countdown. The first snapshot of an editing session is kept across re-previews, so Undo always returns to the layout from before you started, not to the previous variant.
 
@@ -201,7 +204,7 @@ A kept temporary layout lasts until an output is connected or disconnected, the 
 - **Key**: the sorted list of connected display descriptions plus the lid state, for example `Dell Inc. AW3423DWF BTW82S3; Samsung Display Corp. ATNA40CU05-0 [lid open]`. Connector names are not part of the key, so the layout still matches when `DP-9` becomes `DP-10` on another dock or port. When it is applied, each stored spec is mapped onto the current connector with the same description.
 - **Precedence**: a remembered layout beats every Nix profile for its key. Nix remains the fallback for setups you have not remembered and for a fresh state directory.
 - **What is stored**: the full monitor specs of the kept layout (mode, position, scale, transform, VRR, disabled, mirror by description), the layout mode, placement and direction, and a name. The default name is the mode (`extend`, `mirror`, `custom`); `hypr-display remember --name "Room 4"` gives it a label that the summary then shows as "Remembered layout: Room 4".
-- **When it is available**: only after Keep. The switch is disabled during a preview and on an automatic layout; the hint under it says what to do.
+- **When it is available**: only after Keep. The switch is disabled during a preview and on an automatic layout; the hint under it says what to do. The panel names the entry after the shape ("Extend", "External", "Custom"); use `--name` on the command line for a room name.
 - **Forget**: switching it off deletes the entry for the current key and re-applies the automatic profile.
 - **Where**: `~/.local/state/display-profiles/learned.json`, plain JSON you can edit or delete.
 - **Panel state**: the switch reads on only while the live layout is the remembered one for this key. If you keep a different temporary layout on a remembered setup, the switch turns off and offers to replace the entry.
@@ -240,6 +243,7 @@ hypr-display extend  --target DP-9 [--mode 3440x1440@59.97] [--scale 1] [--place
 hypr-display mirror  --target DP-9 [--mode …] [--scale …] [--source internal|external]
 hypr-display external --target DP-9 [--mode …] [--scale …]
 hypr-display place <display> <left|right|above|below|mirror|off> [anchor]   # one drag step
+hypr-display set <display> [--mode 2560x1440@59.95] [--scale 1.25]          # one display's mode/scale, layout kept
 hypr-display confirm                     # Keep
 hypr-display revert                      # Undo
 hypr-display present [--layout extend|mirror|external --target …] [--sink auto|none|<name>]

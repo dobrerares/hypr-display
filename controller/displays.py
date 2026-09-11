@@ -259,6 +259,44 @@ def place_plan(outputs, name, relation, anchor=None):
     return list(specs.values())
 
 
+def set_plan(outputs, name, mode=None, scale=None):
+    """Change one display's mode and/or scale in place; neighbours move by the size difference."""
+    specs = {s['output']: s for s in snapshot(outputs)}
+    by_name = {m['name']: m for m in outputs}
+    if name not in specs:
+        raise ValueError(f'{name} is not connected.')
+    target = specs[name]
+    if target['disabled'] or target['mirror']:
+        raise ValueError(f'{name} is off or mirroring another display; turn it on first.')
+    if mode and mode != 'preferred' and mode not in [v.removesuffix('Hz') for v in by_name[name].get('availableModes', [])]:
+        raise ValueError('Select a mode advertised by this display.')
+    if scale is not None and not 0.5 <= scale <= 3:
+        raise ValueError('Scale must be between 0.5 and 3.')
+    old = logical_rect(by_name[name])
+    new_scale = scale if scale is not None else (by_name[name].get('scale') or 1)
+    if mode and mode != 'preferred':
+        w, h = (int(v) for v in mode.split('@')[0].split('x'))
+    else:
+        w, h = by_name[name]['width'], by_name[name]['height']
+    new = dict(x=old['x'], y=old['y'], w=round(w / new_scale), h=round(h / new_scale))
+    rects = {n: logical_rect(by_name[n]) for n, s in specs.items() if not s['disabled'] and not s['mirror'] and n != name}
+    for r in rects.values():
+        if r['x'] >= old['x'] + old['w'] and overlaps(r, old, 'y'):
+            r['x'] += new['w'] - old['w']
+        elif r['y'] >= old['y'] + old['h'] and overlaps(r, old, 'x'):
+            r['y'] += new['h'] - old['h']
+    rects[name] = new
+    if mode:
+        target['mode'] = mode
+    if scale is not None:
+        target['scale'] = scale
+    dx = min(r['x'] for r in rects.values())
+    dy = min(r['y'] for r in rects.values())
+    for n, r in rects.items():
+        specs[n]['position'] = f"{r['x'] - dx}x{r['y'] - dy}"
+    return list(specs.values())
+
+
 def evaluate(specs):
     code = ';'.join('hl.monitor(' + lua(s) + ')' for s in specs)
     reply = run('hyprctl', 'eval', code)
@@ -695,6 +733,18 @@ def arm_and_apply(state, outputs, profiles, mode, specs, **fields):
         raise
 
 
+def set_display(state, outputs, profiles, operands, args):
+    """`set <display> [--mode …] [--scale …]`: resolution or scale of one display inside any arrangement."""
+    if len(operands) != 1:
+        raise ValueError('Usage: set <display> [--mode WxH@rate] [--scale N]')
+    if time.monotonic() - state.get('heartbeat', 0) > 5:
+        raise ValueError('Display rollback service is not running. Start display-profiles.service first.')
+    mode = args.mode if args.mode != 'preferred' or '--mode' in sys.argv else None
+    scale = args.scale if '--scale' in sys.argv else None
+    specs = set_plan(outputs, operands[0], mode, scale)
+    arm_and_apply(state, outputs, profiles, 'custom', specs, place=None, source=None, target=operands[0])
+
+
 def place(state, outputs, profiles, operands):
     """`place <display> <left|right|above|below|mirror|off> [anchor]`: one drag-and-drop step, previewed like any layout."""
     if len(operands) < 2:
@@ -776,8 +826,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profiles', type=Path, required=True)
     parser.add_argument('action', choices=['status', 'auto', 'extend', 'mirror', 'external', 'internal', 'confirm', 'revert',
-                                           'reload', 'watch', 'present', 'done', 'remember', 'forget', 'export', 'place'])
-    parser.add_argument('operands', nargs='*', help='place: <display> <left|right|above|below|mirror|off> [anchor]')
+                                           'reload', 'watch', 'present', 'done', 'remember', 'forget', 'export', 'place', 'set'])
+    parser.add_argument('operands', nargs='*', help='place: <display> <left|right|above|below|mirror|off> [anchor]; set: <display>')
     parser.add_argument('--target')
     parser.add_argument('--mode', default='preferred', help='Advertised resolution@refresh, or preferred')
     parser.add_argument('--scale', type=float, default=1.0)
@@ -823,6 +873,8 @@ def main():
             present(state, outputs, profiles, args)
         elif args.action == 'place':
             place(state, outputs, profiles, args.operands)
+        elif args.action == 'set':
+            set_display(state, outputs, profiles, args.operands, args)
         else:
             preview(state, outputs, profiles, args.action, args)
 

@@ -593,6 +593,35 @@ class DisplaysTest(unittest.TestCase):
         with patch.object(d, 'lid_closed', return_value=True), self.assertRaises(ValueError):
             d.place_plan(outputs, 'HDMI-A-1', 'mirror', 'eDP-1')
 
+    def test_set_scale_moves_the_neighbours_by_the_size_difference(self):
+        specs = d.set_plan(self.three(), 'HDMI-A-1', None, 2.0)
+        hdmi = next(s for s in specs if s['output'] == 'HDMI-A-1')
+        self.assertEqual(hdmi['scale'], 2.0)
+        self.assertEqual(self.positions(specs), {'eDP-1': '0x0', 'HDMI-A-1': '2160x0', 'DP-2': '3120x0'})
+
+    def test_set_mode_changes_only_that_display(self):
+        outputs = self.three()
+        outputs[1]['availableModes'] = ['1920x1080@60.00Hz', '1280x720@60.00Hz']
+        specs = d.set_plan(outputs, 'HDMI-A-1', '1280x720@60.00', None)
+        hdmi = next(s for s in specs if s['output'] == 'HDMI-A-1')
+        self.assertEqual(hdmi['mode'], '1280x720@60.00')
+        self.assertEqual(self.positions(specs), {'eDP-1': '0x0', 'HDMI-A-1': '2160x0', 'DP-2': '3440x0'})
+        with self.assertRaises(ValueError):
+            d.set_plan(outputs, 'HDMI-A-1', '640x480@60.00', None)
+        with self.assertRaises(ValueError):
+            d.set_plan(outputs, 'DP-7', None, 1.5)
+        outputs[1].update(disabled=True, width=0, height=0)
+        with self.assertRaises(ValueError):
+            d.set_plan(outputs, 'HDMI-A-1', None, 1.5)
+
+    def test_set_cli_previews_as_custom(self):
+        self.fresh_state()
+        self.cli('set', 'HDMI-A-1', '--scale', '1.5')
+        state = d.read_state()
+        self.assertEqual(state['mode'], 'custom')
+        self.assertEqual(next(s for s in state['active'] if s['output'] == 'HDMI-A-1')['scale'], 1.5)
+        self.assertIn('deadline', state)
+
     def test_place_cli_previews_a_custom_layout_with_undo(self):
         self.fresh_state()
         self.cli('place', 'HDMI-A-1', 'left', 'eDP-1')

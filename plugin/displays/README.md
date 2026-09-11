@@ -22,10 +22,12 @@ turn it off. Drag a tile out of the tray onto a strip to turn it back on. Each
 drop is one `hypr-display place` step with the same countdown and Undo. The
 chips remain for keyboard use; Noctalia has no keyboard drag.
 
-- **Layout chips**: Auto (Nix dock profile or a remembered layout), Laptop,
-  Extend, Mirror, External. Options appear only for the selected layout:
-  placement arrows for Extend, direction for Mirror, resolution and scale for
-  any layout that uses the external display. With several externals, the
+- **Shape chips**: Laptop, Extend, Mirror, External describe what is on
+  screen, whatever produced it (Nix profile, chip or drag), so their options
+  are always available: placement arrows for Extend, direction for Mirror,
+  resolution and scale whenever the external is on. **Auto** in the header
+  is the origin: highlighted while the automatic profile is active, otherwise
+  the way back to it. With several externals, the
   chips act on the display chosen in the select that appears above them, the
   others keep Hyprland's automatic placement, and dragging arranges them all;
   the summary then reads "Custom arrangement".
