@@ -294,8 +294,10 @@ local function schematic(map, caption, predicted, drag)
     table.insert(kids, tray(map, 0.02, drag, #on > 1 and on or {}))
   end
   table.insert(kids, ui.label({ text = caption, fontSize = 11, color = predicted and "primary" or "on_surface_variant", maxLines = 1, maxWidth = 560 }))
+  -- The panel surface has a fixed height (no auto-size in the host), so this
+  -- card grows to take whatever the rows below do not need.
   return ui.column({
-    fill = "surface_variant/0.45", radius = 12, padding = 10, gap = 6, align = "center", justify = "center", minHeight = 150,
+    fill = "surface_variant/0.45", radius = 12, padding = 10, gap = 8, align = "center", justify = "center", minHeight = 150, flexGrow = 1,
     border = predicted and "primary/0.5" or "outline/0.25", borderWidth = 1,
   }, kids)
 end
@@ -531,6 +533,21 @@ render = function()
     table.insert(rows, ui.label({ text = "Lid closed: Mirror and Laptop are unavailable until you open it.", fontSize = 12, color = "on_surface_variant", maxLines = 1 }))
   end
 
+  -- Messages sit under the action they belong to, above the two cards, so the
+  -- fixed-height surface can only ever clip the cards, never the explanation.
+  if noticeText ~= "" then
+    table.insert(rows, ui.row({ gap = 6, align = "center" }, {
+      ui.glyph({ name = "circle-check", size = 14, color = "primary" }),
+      ui.label({ text = noticeText, color = "primary", maxLines = 1, maxWidth = 540 }),
+    }))
+  end
+  if errorText ~= "" then
+    table.insert(rows, ui.row({ gap = 6, align = "start" }, {
+      ui.glyph({ name = "alert-triangle", size = 14, color = "error" }),
+      ui.label({ text = errorText, color = "error", maxLines = 2, maxWidth = 540 }),
+    }))
+  end
+
   -- Present: one switch for keep-awake + Do Not Disturb + audio on the external.
   local presentDetail
   if presenting then
@@ -573,21 +590,7 @@ render = function()
     ui.toggle({ checked = remembered, enabled = not busy and (remembered or kept), onChange = "onRemember" }),
   }))
 
-  if noticeText ~= "" then
-    table.insert(rows, ui.row({ gap = 6, align = "center" }, {
-      ui.glyph({ name = "circle-check", size = 14, color = "primary" }),
-      ui.label({ text = noticeText, color = "primary", maxLines = 1, maxWidth = 540 }),
-    }))
-  end
-  if errorText ~= "" then
-    table.insert(rows, ui.row({ gap = 6, align = "start" }, {
-      ui.glyph({ name = "alert-triangle", size = 14, color = "error" }),
-      ui.label({ text = errorText, color = "error", maxLines = 3, maxWidth = 540 }),
-    }))
-  end
-  -- The panel surface has a fixed height; states with options, a countdown and a
-  -- message stack taller than it, so the column scrolls instead of clipping.
-  panel.render(ui.scroll({ gap = 8 }, rows))
+  panel.render(ui.column({ gap = 8 }, rows))
 end
 
 -- --- lifecycle + callbacks --------------------------------------------------
