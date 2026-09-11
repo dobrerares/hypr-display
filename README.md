@@ -65,7 +65,7 @@ inputs.hypr-display = {
 
   # Put the bar widget somewhere and give the panel a key.
   programs.noctalia.settings.widget.displays.type = "rdobre/displays:bar";
-  programs.noctalia.settings.bar.end = [ "displays" "network" "volume" ];  # or wherever you keep widgets
+  programs.noctalia.settings.bar.main.end = [ "displays" "network" "volume" ];  # your bar's widget list
   wayland.windowManager.hyprland.settings.bind = [{
     _args = [ "SUPER + SHIFT + F8"
               (lib.generators.mkLuaInline ''hl.dsp.exec_cmd("noctalia msg panel-toggle rdobre/displays:panel")'')
