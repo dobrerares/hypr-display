@@ -60,6 +60,20 @@ def panel(outputs):
     return next((m for m in outputs if m['name'].startswith(('eDP-', 'LVDS-', 'DSI-'))), None)
 
 
+def best_mode(m):
+    """Highest resolution, then highest refresh rate, from the advertised modes.
+
+    Hyprland's 'preferred' is the EDID default, which on gaming panels is the
+    60 Hz timing; a docked display without a profile should run at its best."""
+    modes = []
+    for text in m.get('availableModes') or []:
+        match = re.match(r'(\d+)x(\d+)@([\d.]+)', text)
+        if match:
+            w, h, rate = int(match[1]), int(match[2]), float(match[3])
+            modes.append((w * h, rate, f'{w}x{h}@{rate:.2f}'))
+    return max(modes)[2] if modes else 'preferred'
+
+
 def lid_closed():
     return any('closed' in p.read_text() for p in Path('/proc/acpi/button/lid').glob('*/state'))
 
@@ -92,7 +106,7 @@ def auto_plan(outputs, profiles, closed=False, learned=None):
     for m in outputs:
         settings = profile.get('monitors', {}).get(m['name'], {})
         settings = profile.get('monitors', {}).get('desc:' + m.get('description', ''), settings)
-        spec = dict(output=m['name'], mode='preferred', position='auto', scale=1,
+        spec = dict(output=m['name'], mode=best_mode(m), position='auto', scale=1,
                     disabled=False, mirror='', transform=0, vrr=False)
         if settings.get('disabled'):
             spec['disabled'] = True
@@ -112,7 +126,7 @@ def auto_plan(outputs, profiles, closed=False, learned=None):
     return name, result
 
 
-def manual_plan(outputs, mode, target=None, resolution='preferred', scale=1.0, place='right', source='internal'):
+def manual_plan(outputs, mode, target=None, resolution='best', scale=1.0, place='right', source='internal'):
     if place not in POSITIONS:
         raise ValueError('Placement must be one of: ' + ', '.join(POSITIONS) + '.')
     if source not in SOURCES:
@@ -148,7 +162,8 @@ def manual_plan(outputs, mode, target=None, resolution='preferred', scale=1.0, p
             if mode == 'mirror' and source == 'external':
                 s.update(mirror=target['name'], position='auto')
         if is_target:
-            s.update(mode=resolution, scale=scale, vrr=False, transform=0)
+            s.update(mode=best_mode(target) if resolution in ('best', 'preferred') else resolution,
+                     scale=scale, vrr=False, transform=0)
             if mode == 'extend':
                 s['position'] = POSITIONS[place]
             elif mode == 'mirror' and source == 'internal':
@@ -164,7 +179,8 @@ def logical_rect(m):
     """Scaled rectangle of a monitor; a display that is off uses its preferred mode."""
     w, h = m.get('width') or 0, m.get('height') or 0
     if not w or not h:
-        first = (m.get('availableModes') or ['1920x1080'])[0].split('@')[0]
+        best = best_mode(m)
+        first = (best if best != 'preferred' else '1920x1080').split('@')[0]
         w, h = (int(v) for v in first.split('x'))
     scale = m.get('scale') or 1
     return dict(x=m.get('x', 0), y=m.get('y', 0), w=round(w / scale), h=round(h / scale))
@@ -250,7 +266,7 @@ def place_plan(outputs, name, relation, anchor=None):
         insert(rects, mine, relation, rects[anchor])
         rects[name] = mine
         if moved['disabled']:
-            moved['mode'] = 'preferred'
+            moved['mode'] = best_mode(by_name[name])
         moved.update(disabled=False, mirror='')
     dx = min((r['x'] for r in rects.values()), default=0)
     dy = min((r['y'] for r in rects.values()), default=0)

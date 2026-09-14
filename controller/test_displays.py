@@ -567,12 +567,12 @@ class DisplaysTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             d.place_plan([PANEL], 'eDP-1', 'off')
 
-    def test_place_turns_a_disabled_display_on_using_its_preferred_mode(self):
+    def test_place_turns_a_disabled_display_on_using_its_best_mode(self):
         off = dict(HDMI, width=0, height=0, disabled=True, availableModes=['1920x1080@60.00Hz', '1280x720@60.00Hz'])
         specs = d.place_plan([PANEL, off], 'HDMI-A-1', 'right', 'eDP-1')
         hdmi = next(s for s in specs if s['output'] == 'HDMI-A-1')
         self.assertFalse(hdmi['disabled'])
-        self.assertEqual(hdmi['mode'], 'preferred')
+        self.assertEqual(hdmi['mode'], '1920x1080@60.00')
         self.assertEqual(self.positions(specs), {'eDP-1': '0x0', 'HDMI-A-1': '2160x0'})
 
     def test_place_copies_of_a_display_that_turns_off_are_turned_off(self):
@@ -645,3 +645,16 @@ class DisplaysTest(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class BestModeTests(unittest.TestCase):
+    def test_highest_resolution_then_highest_refresh(self):
+        dell = dict(availableModes=['3440x1440@59.97Hz', '3440x1440@164.90Hz', '3440x1440@99.98Hz', '2560x1440@143.97Hz'])
+        self.assertEqual(d.best_mode(dell), '3440x1440@164.90')
+        self.assertEqual(d.best_mode(dict(availableModes=[])), 'preferred')
+
+    def test_fallback_profile_uses_best_mode_for_an_unknown_display(self):
+        unknown = dict(HDMI, description='Some Projector', availableModes=['1920x1080@60.00Hz', '1920x1080@75.00Hz', '1280x720@60.00Hz'])
+        name, specs = d.auto_plan([PANEL, unknown], {}, closed=False)
+        self.assertEqual(name, 'fallback')
+        self.assertEqual(next(s for s in specs if s['output'] == 'HDMI-A-1')['mode'], '1920x1080@75.00')
